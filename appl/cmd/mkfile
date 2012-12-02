@@ -73,6 +73,7 @@ TARG=\
 	freq.dis\
 	fs.dis\
 	ftest.dis\
+	ftrans.dis\
 	ftpfs.dis\
 	getauthinfo.dis\
 	gettar.dis\
