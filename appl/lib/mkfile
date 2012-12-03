@@ -14,6 +14,7 @@ DIRS=\
 	w3c\
 
 TARG=\
+	acmewin.dis\
 	arg.dis\
 	asn1.dis\
 	attrdb.dis\
