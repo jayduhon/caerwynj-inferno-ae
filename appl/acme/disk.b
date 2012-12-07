@@ -26,7 +26,7 @@ tempfile() : ref Sys->FD
 		(ok, nil) := sys->stat(buf);
 		if(ok == 0)
 			continue;
-		fd := sys->create(buf, Sys->ORDWR|Sys->ORCLOSE, 8r600);
+		fd := sys->create(buf, Sys->ORDWR|Sys->ORCLOSE|Sys->OEXCL, 8r600);
 		if(fd != nil)
 			return fd;
 	}

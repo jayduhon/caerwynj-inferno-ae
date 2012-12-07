@@ -176,6 +176,8 @@ cmdexec(t: ref Text, cp: ref Cmd): int
 		if(cp.addr != nil)
 			dot = cmdaddress(cp.addr, dot, 0);
 		for(cp = cp.cmd; cp!=nil; cp = cp.next){
+			if(dot.r.q1 > t.file.buf.nc)
+				editerror("dot extends past end of buffer during { command");
 			t.q0 = dot.r.q0;
 			t.q1 = dot.r.q1;
 			cmdexec(t, cp);
@@ -263,6 +265,8 @@ B_cmd(t: ref Text, cp: ref Cmd): int
 c_cmd(t: ref Text, cp: ref Cmd): int
 {
 	elogreplace(t.file, addr.r.q0, addr.r.q1, cp.text.r, cp.text.n);
+	t.q0 = addr.r.q0;
+	t.q1 = addr.r.q1;
 	return TRUE;
 }
 
@@ -270,6 +274,8 @@ d_cmd(t: ref Text, nil: ref Cmd): int
 {
 	if(addr.r.q1 > addr.r.q0)
 		elogdelete(t.file, addr.r.q0, addr.r.q1);
+	t.q0 = addr.r.q0;
+	t.q1 = addr.r.q0;
 	return TRUE;
 }
 
@@ -449,7 +455,7 @@ move(f: ref File, addr2: Address)
 		copy(f, addr2);
 		elogdelete(f, addr.r.q0, addr.r.q1);
 	}else if(addr.r.q0==addr2.r.q0 && addr.r.q1==addr2.r.q1){
-		;	# move to self; no-op
+		;  # move to self; no-op
 	}else
 		editerror("move overlaps itself");
 }
@@ -579,7 +585,7 @@ s_cmd(t: ref Text, cp: ref Cmd): int
 	if(!didsub && nest==0)
 		editerror("no substitution");
 	t.q0 = addr.r.q0;
-	t.q1 = addr.r.q1+delta;
+	t.q1 = addr.r.q1;
 	return TRUE;
 }
 
@@ -780,6 +786,8 @@ append(f: ref File, cp: ref Cmd, p: int): int
 {
 	if(cp.text.n > 0)
 		eloginsert(f, p, cp.text.r, cp.text.n);
+	f.curtext.q0 = p;
+	f.curtext.q1 = p;
 	return TRUE;
 }
 
@@ -967,15 +975,23 @@ filelooper(cp: ref Cmd, XY: int)
 		loopstruct = ref Looper;
 	loopstruct.cp = cp;
 	loopstruct.XY = XY;
-	if(loopstruct.w != nil)	# error'ed out last time
-		loopstruct.w = nil;
 	loopstruct.w = nil;
 	loopstruct.nw = 0;
 	aw := ref Allwin.LP(loopstruct);
 	allwindows(Edit->ALLLOOPER, aw);
 	aw = nil;
+	#
+	# add a ref to all windows to keep safe windows accessed by X
+	# that would not otherwise have a ref to hold them up during
+	# the shenanigans.  note this with globalincref so that any
+	# newly created windows start with an extra reference.
+	#
+	allwindows(Edit->ALLINCREF, nil);
+	dat->globalincref = 1;
 	for(i=0; i<loopstruct.nw; i++)
 		cmdexec(loopstruct.w[i].body, cp.cmd);
+	allwindows(Edit->ALLDECREF, nil);
+	dat->globalincref = 0;
 	loopstruct.w = nil;
 
 	--Glooping;
@@ -1192,7 +1208,7 @@ filematch(f: ref File, r: ref String): int
 {
 	buf: string;
 	w: ref Window;
-	match, i, dirty: int;
+	match, dirty: int;
 	s: Rangeset;
 
 	# compile expr first so if we get an error, we haven't allocated anything
@@ -1203,7 +1219,7 @@ filematch(f: ref File, r: ref String): int
 	dirty = !w.isdir && !w.isscratch && f.mod;
 	buf = sprint("%c%c%c %s\n", " '"[dirty],
 		'+', " ."[curtext!=nil && curtext.file==f], f.name);
-	(match, s) = rxexecute(nil, buf, 0, i);
+	(match, s) = rxexecute(nil, buf, 0, len buf);
 	buf = nil;
 	return match;
 }
@@ -1348,3 +1364,4 @@ copysel(rs: Rangeset): Rangeset
 		nrs[i] = rs[i];
 	return nrs;
 }
+	

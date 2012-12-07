@@ -28,7 +28,7 @@ Line : con 1;
 
 isaddrc(r : int) : int
 {
-	if (utils->strchr("0123456789+-/$.#", r) >= 0)
+	if (utils->strchr("0123456789+-/$.#,;", r) >= 0)
 		return TRUE;
 	return FALSE;
 }
@@ -101,7 +101,8 @@ number(md: ref Dat->Mntdir, t : ref Text, r : Range, line : int, dir : int, size
 				}
 				--q0;
 			}
-			if(line > 0)
+			# :1-1 is :0 = #0, but :1-2 is an error
+			if(line > 1)
 				raise "e";
 			while(q0>0 && t.readc(q0-1)!='\n')
 				--q0;
@@ -190,7 +191,7 @@ address(md: ref Dat->Mntdir, t : ref Text, lim : Range, ar : Range, a0 : ref Tex
 			return (eval, q, r);
 		'+'  or '-' =>
 			if(eval && (prevc=='+' || prevc=='-')){
-				if((nc := xgetc(a0, a1, q)) != '#' && nc != '/' && nc != '?')
+				if ((nc := xgetc(a0, a1, q)) != '#' && nc != '/' && nc != '?')
 					(eval, r) = number(md, t, r, 1, prevc, Line);	# do previous one
 			}
 			dir = c;

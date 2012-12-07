@@ -29,12 +29,15 @@ Textm : module {
 		ncachealloc : int;
 		cache : string;
 		nofill : int;
+		navoffset : int;
 
 		init : fn(t : self ref Text, f : ref Filem->File, r : Draw->Rect, rf : ref Dat->Reffont, cols : array of ref Draw->Image);
 		redraw : fn(t : self ref Text, r : Draw->Rect, f : ref Draw->Font, b : ref Draw->Image, n : int);
 		insert : fn(t : self ref Text, n : int, s : string, p : int, q : int, r : int);
 		bsinsert : fn(t : self ref Text, n : int, s : string, p : int, q : int) : (int, int);
+		complete : fn(t : self ref Text): string;
 		delete : fn(t : self ref Text, n : int, p : int, q : int);
+		filewidth : fn(t: self ref Text, q0, oneelement: int): int;
 		loadx : fn(t : self ref Text, n : int, b : string, q : int) : int;
 		typex : fn(t : self ref Text, r : int, echomode : int);
 		select : fn(t : self ref Text, d : int);
@@ -45,10 +48,11 @@ Textm : module {
 		show : fn(t : self ref Text, p : int, q : int);
 		fill : fn(t : self ref Text);
 		commit : fn(t : self ref Text, n : int);
+		constrain : fn(t : self ref Text, p : int, q : int) : (int, int);
 		setorigin : fn(t : self ref Text, p : int, q : int);
 		readc : fn(t : self ref Text, n : int) : int;
 		reset : fn(t : self ref Text);
-		reshape : fn(t : self ref Text, r : Draw->Rect) : int;
+		reshape : fn(t : self ref Text, r : Draw->Rect, keepextra: int) : int;
 		close : fn(t : self ref Text);
 		framescroll : fn(t : self ref Text, n : int);
 		select23 : fn(t : self ref Text, p : int, q : int, i, it : ref Draw->Image, n : int) : (int, int, int);

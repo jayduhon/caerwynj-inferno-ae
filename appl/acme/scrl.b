@@ -169,18 +169,19 @@ scroll(t : ref Text, but : int)
 			t.setorigin(p0, TRUE);	
 		oldp0 = p0;
 		# debounce 
-		if(first){
+		if(first){	
 			graph->bflush();
-			sys->sleep(200);
-			alt {
+			timer := timerm->timerstart(200);
+			loop: for(;;) alt{
+			<-(timer.c) =>
+				timerm->timerstop(timer);
+				break loop;
 			*mouse = *<-cmouse =>
-				;
-			* =>
-				;
+				; 
 			}
 			first = FALSE;
-		}
-		scrsleep(80);
+		}else
+			scrsleep(80);
 	}while(mouse.buttons & (1<<(but-1)));
 	while(mouse.buttons)
 		frgetmouse();

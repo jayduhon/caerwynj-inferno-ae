@@ -17,7 +17,7 @@ acme : Acme;
 
 sprint : import sys;
 FALSE, TRUE, XXX, Astring : import Dat;
-Reffont, reffont, Lock, Ref, button, modbutton : import dat;
+Reffont, reffont, Lock, Ref, button, modbutton, mouse : import dat;
 Point, Rect, Image : import drawm;
 min, max, error, warning, stralloc, strfree : import utils;
 font, draw : import graph;
@@ -69,13 +69,22 @@ Window.init(w : self ref Window, clone : ref Window, r : Rect)
 	w.refx = Ref.init();
 	w.tag = textm->newtext();
 	w.tag.w = w;
+	w.taglines = 1;
+	w.tagexpand = TRUE;
+	w.tagsafe = FALSE;
 	w.body = textm->newtext();
 	w.body.w = w;
 	w.id = ++winid;
 	w.refx.inc();
+	if(dat->globalincref)
+		w.refx.inc();
 	w.ctlfid = ~0;
 	w.utflastqid = -1;
 	r1 = r;
+	
+	w.tagtop = r;
+	w.tagtop.max.y = r.min.y + font.height;
+	
 	r1.max.y = r1.min.y + font.height;
 	reffont.r.inc();
 	f = dummy.addtext(w.tag);
@@ -94,7 +103,7 @@ Window.init(w : self ref Window, clone : ref Window, r : Rect)
 		w.tag.setselect(nc, nc);
 	}
 	r1 = r;
-	r1.min.y += font.height + 1;
+	r1.min.y += w.taglines*font.height + 1;
 	if(r1.max.y < r1.min.y)
 		r1.max.y = r1.min.y;
 	f = nil;
@@ -120,24 +129,69 @@ Window.init(w : self ref Window, clone : ref Window, r : Rect)
 	draw(mainwin, br, button, nil, button.r.min);
 	w.filemenu = TRUE;
 	w.maxlines = w.body.frame.maxlines;
+	w.autoindent = dat->globalautoindent;
 	if(clone != nil){
 		w.dirty = clone.dirty;
+		w.autoindent = clone.autoindent;
 		w.body.setselect(clone.body.q0, clone.body.q1);
 		w.settag();
 	}
 }
 
-Window.reshape(w : self ref Window, r : Rect, safe : int) : int
+taglines(w: ref Window, r: Rect): int
+{
+	if(!w.tagexpand)
+		return 1;
+	w.tag.frame.noredraw = 1;
+	w.tag.reshape(r, TRUE);
+	w.tag.frame.noredraw = 0;
+
+	if(w.tag.frame.nlines >= w.tag.frame.maxlines)
+		return w.tag.frame.maxlines;
+	rune := ref Astring;
+	n := w.tag.frame.nlines;
+	if(w.tag.file.buf.nc == 0)
+		return 1;
+	w.tag.file.buf.read(w.tag.file.buf.nc - 1, rune, 0, 1);
+	if(rune.s[0] == '\n')
+		n++;
+	if(n == 0)
+		n = 1;
+	return n;
+}
+
+Window.reshape(w : self ref Window, r : Rect, safe : int, keepextra: int) : int
 {
 	r1, br : Rect;
-	y : int;
+	y, oy : int;
+	tagresized, mouseintag : int;
 	b : ref Image;
+	p : Point;
+
+	w.tagtop = r;
+	w.tagtop.max.y = r.min.y+font.height;
+	
+# TAG If necessary, recompute the number of lines that should
+# be in the tag;
 
 	r1 = r;
-	r1.max.y = r1.min.y + font.height;
+	r1.max.y = min(r.max.y, r1.min.y + w.taglines*font.height);
 	y = r1.max.y;
-	if(!safe || !w.tag.frame.r.eq(r1)){
-		y = w.tag.reshape(r1);
+	mouseintag = mouse.xy.in(w.tag.all);
+	if(!safe || !w.tagsafe || ! w.tag.all.eq(r1)){
+		w.taglines = taglines(w, r);
+		w.tagsafe = TRUE;
+	}
+# END TAG
+
+	r1 = r;
+	r1.max.y = min(r.max.y, r1.min.y + w.taglines*font.height);
+	y = r1.max.y;
+	tagresized = 0;
+	if(1|| !safe || !w.tag.frame.r.eq(r1)){
+		tagresized = 1;
+		w.tag.reshape(r1, TRUE);
+		y = w.tag.frame.r.max.y;
 		b = button;
 		if(w.body.file.mod && !w.isdir && !w.isscratch)
 			b = modbutton;
@@ -145,26 +199,34 @@ Window.reshape(w : self ref Window, r : Rect, safe : int) : int
 		br.max.x = br.min.x + b.r.dx();
 		br.max.y = br.min.y + b.r.dy();
 		draw(mainwin, br, b, nil, b.r.min);
+# TAG
+		if(mouseintag && !mouse.xy.in(w.tag.all)){
+			p = mouse.xy;
+			p.y = w.tag.all.max.y-3;
+			graph->cursorset(p);
+		}
+# END TAG
 	}
-	if(!safe || !w.body.frame.r.eq(r1)){
-		if(y+1+font.height > r.max.y){		# no body 
+	
+	r1 = r;
+	r1.min.y = y;
+	if(tagresized || !safe || !w.body.frame.r.eq(r1)){
+		oy = y;
+		if(y+1+w.body.frame.font.height <= r.max.y ){ # no body was > r.max.y
+			r1.min.y = y;
+			r1.max.y = y + 1;
+			draw(mainwin, r1, tagcols[BORD], nil, (0, 0));
+			y++;
+			r1.min.y = min(y, r.max.y);
+			r1.max.y = r.max.y;
+		}else{
 			r1.min.y = y;
 			r1.max.y = y;
-			w.body.reshape(r1);
-			w.r = r;
-			w.r.max.y = y;
-			return y;
 		}
-		r1 = r;
-		r1.min.y = y;
-		r1.max.y = y + 1;
-		draw(mainwin, r1, tagcols[BORD], nil, (0, 0));
-		r1.min.y = y + 1;
-		r1.max.y = r.max.y;
-		y = w.body.reshape(r1);
 		w.r = r;
-		w.r.max.y = y;
+		w.r.max.y = w.body.reshape(r1, keepextra);
 		scrdraw(w.body);
+		w.body.all.min.y = oy;
 	}
 	w.maxlines = min(w.body.frame.nlines, max(w.maxlines, w.body.frame.maxlines));
 	return w.r.max.y;
@@ -189,12 +251,12 @@ Window.lock(w : self ref Window, owner : int)
 
 Window.unlock(w : self ref Window)
 {
-	f := w.body.file;
-	#
+	f : ref File;
 	# subtle: loop runs backwards to avoid tripping over
 	# winclose indirectly editing f.text and freeing f
 	# on the last iteration of the loop
-	#
+
+	f = w.body.file;
 	for(i:=f.ntext-1; i>=0; i--){
 		w = f.text[i].w;
 		w.owner = 0;
@@ -404,7 +466,9 @@ Window.settag1(w : self ref Window)
 		if(w.body.file.seq == 0)
 			new += " Look ";
 	}
+	resize := 0;
 	if(new != old.s[0:k]){
+		resize = 1;
 		n = k;
 		if(n > len new)
 			n = len new;
@@ -443,6 +507,10 @@ Window.settag1(w : self ref Window)
 	br.max.x = br.min.x + b.r.dx();
 	br.max.y = br.min.y + b.r.dy();
 	draw(mainwin, br, b, nil, b.r.min);
+#	if(resize){
+#		w.tagsafe = 0;
+#		w.reshape(w.r, TRUE, TRUE);
+#	}
 }
 
 Window.commit(w : self ref Window, t : ref Text)
@@ -532,8 +600,8 @@ Window.ctlprint(w : self ref Window, fonts : int) : string
 	s := sprint("%11d %11d %11d %11d %11d ", w.id, w.tag.file.buf.nc,
 			w.body.file.buf.nc, w.isdir, w.dirty);
 	if(fonts)
-		return sprint("%s%11d %q %11d ", s, w.body.frame.r.dx(),
-			w.body.reffont.f.name, w.body.frame.maxtab);
+		return sprint("%s%11d %q %11d ", s, w.body.frame.r.dx(), w.body.reffont.f.name,
+			w.body.frame.maxtab);
 	return s;
 }
 

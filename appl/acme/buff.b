@@ -97,9 +97,9 @@ Buffer.setcache(b : self ref Buffer, q0 : int)
 	while(q+blp.n <= q0 && q+blp.n < b.nc){
 		q += blp.n;
 		i++;
-		blp = b.bl[i];
 		if(i >= b.nbl)
 			error("block not found");
+		blp = b.bl[i];
 	}
 	bl = blp;
 	# remember position 

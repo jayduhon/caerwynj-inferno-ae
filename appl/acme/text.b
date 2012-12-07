@@ -2,6 +2,7 @@ implement Textm;
 
 include "common.m";
 include "keyboard.m";
+include "complete.m";
 
 sys : Sys;
 utils : Utils;
@@ -17,8 +18,11 @@ filem : Filem;
 columnm : Columnm;
 windowm : Windowm;
 exec : Exec;
+lookx : Look;
+complete: Complete;
 
 Dir, sprint : import sys;
+dirname : import lookx;
 frgetmouse : import acme;
 min, warning, error, stralloc, strfree, isalnum : import utils;
 Frame, frinsert, frdelete, frptofchar, frcharofpt, frselect, frdrawsel, frdrawsel0, frtick : import framem;
@@ -121,16 +125,17 @@ init(mods : ref Dat->Mods)
 	columnm = mods.columnm;
 	windowm = mods.windowm;
 	exec = mods.exec;
+	lookx = mods.look;
+	
+	complete = load Complete Complete->PATH;
+	complete->init();
 }
 
 TABDIR : con 3;	# width of tabs in directory windows
 
 # remove eventually
 KF : con 16rF000;
-Kup : con KF | 16r0E;
-Kleft : con KF | 16r11;
-Kright : con KF | 16r12;
-Kdown : con 16r80;
+
 
 nulltext : Text;
 
@@ -162,7 +167,7 @@ Text.redraw(t : self ref Text, r : Rect, f : ref Draw->Font, b : ref Image, odx 
 {
 	framem->frinit(t.frame, r, f, b, t.frame.cols);
 	rr := t.frame.r;
-	rr.min.x -= Scrollwid;	# back fill to scroll bar
+	rr.min.x -= Scrollwid+Scrollgap;	# back fill to scroll bar
 	draw(t.frame.b, rr, t.frame.cols[Framem->BACK], nil, (0, 0));
 	# use no wider than 3-space tabs in a directory
 	maxt := dat->maxtab;
@@ -173,10 +178,6 @@ Text.redraw(t : self ref Text, r : Rect, f : ref Draw->Font, b : ref Image, odx 
 			maxt = t.tabstop;
 	}
 	t.frame.maxtab = maxt*charwidth(f, '0');
-	# c = '0';
-	# if(t.what==Body && t.w!=nil && t.w.isdir)
-	#	c = ' ';
-	# t.frame.maxtab = Dat->Maxtab*charwidth(f, c);
 	if(t.what==Body && t.w.isdir && odx!=t.all.dx()){
 		if(t.frame.maxlines > 0){
 			t.reset();
@@ -189,14 +190,14 @@ Text.redraw(t : self ref Text, r : Rect, f : ref Draw->Font, b : ref Image, odx 
 	}
 }
 
-Text.reshape(t : self ref Text, r : Rect) : int
+Text.reshape(t : self ref Text, r : Rect, keepextra: int) : int
 {
 	odx : int;
-
-	if(r.dy() > 0)
-		r.max.y -= r.dy()%t.frame.font.height;
-	else
+	
+	if(r.dy() <= 0)
 		r.max.y = r.min.y;
+	if(!keepextra)
+		r.max.y -= r.dy()%t.frame.font.height;
 	odx = t.all.dx();
 	t.all = r;
 	t.scrollr = r;
@@ -204,9 +205,14 @@ Text.reshape(t : self ref Text, r : Rect) : int
 	t.lastsr = dat->nullrect;
 	r.min.x += Scrollwid+Scrollgap;
 	framem->frclear(t.frame, 0);
-	# t.redraw(r, t.frame.font, t.frame.b, odx);
 	t.redraw(r, t.frame.font, mainwin, odx);
-	return r.max.y;
+	if(keepextra && t.frame.r.max.y < t.all.max.y){
+		r.min.x -= Scrollgap;
+		r.min.y = t.frame.r.max.y;
+		r.max.y = t.all.max.y;
+		mainwin.draw(r, t.frame.cols[BACK], nil, (0,0));
+	}
+	return t.all.max.y;
 }
 
 Text.close(t : self ref Text)
@@ -286,7 +292,7 @@ Text.columnate(t : self ref Text, dlp : array of ref Dirlist, ndl : int)
 	for(i=0; i<ndl; i++){
 		dl = dlp[i];
 		w = dl.wid;
-		if(maxt-w%maxt < mint)
+		if(maxt-w%maxt<mint || w%maxt==0)
 			w += mint;
 		if(w % maxt)
 			w += maxt-(w%maxt);
@@ -419,7 +425,7 @@ Text.loadx(t : self ref Text, q0 : int, file : string, setqid : int) : int
 			if(u != t){
 				if(u.org > u.file.buf.nc)	# will be 0 because of reset(), but safety first 
 					u.org = 0;
-				u.reshape(u.all);
+				u.reshape(u.all, TRUE);
 				u.backnl(u.org, 0);	# go to beginning of line 
 			}
 			u.setselect(q0, q0);
@@ -629,6 +635,13 @@ Text.delete(t : self ref Text, q0 : int, q1 : int, tofile : int)
 	}
 }
 
+Text.constrain(t : self ref Text, q0 : int, q1 : int) : (int, int)
+{
+	p0 := min(q0, t.file.buf.nc);
+	p1 := min(q1, t.file.buf.nc);
+	return (p0, p1);
+}
+
 onechar : ref Astring;
 
 Text.readc(t : self ref Text, q : int) : int
@@ -671,11 +684,96 @@ Text.bswidth(t : self ref Text, c : int) : int
 	return t.q0-q;
 }
 
+Text.filewidth(t: self ref Text, q0, oneelement: int): int
+{
+	q: int;
+	r: int;
+	
+	q = q0;
+	while(q > 0){
+		r = t.readc(q-1);
+		if(r <= ' ')
+			break;
+		if(oneelement && r == '/')
+			break;
+		--q;
+	}
+	return q0-q;
+}
+
+Text.complete(t: self ref Text): string
+{
+
+	if(t.q0<t.file.buf.nc && t.readc(t.q0) > ' ')
+		return nil;
+	nstr := t.filewidth(t.q0, 1);
+	npath := t.filewidth(t.q0-nstr, 0);
+	
+	q := t.q0-nstr;
+	str := "";
+	path := "";
+	for(i:=0; i<nstr; i++)
+		str[i] = t.readc(q++);
+	q = t.q0-nstr-npath;
+	for(i=0; i<npath; i++)
+		path[i] = t.readc(q++);
+	n : int;
+	if(npath>0 && path[0]=='/')
+		dir:=path;
+	else{
+		(dir, n) = dirname(t, nil, 0);
+		if(len dir == 0)
+			dir = ".";
+		dir = dir + "/" + path;
+		(dir, nil) = lookx->cleanname(dir, len dir);
+	}
+	(c, err) := complete->complete(dir, str);
+	if(c == nil){
+		warning(nil, sprint("error attempting complete: %s\n", err));
+		return nil;
+	}
+	if(!c.advance){
+		if(len dir > 0 && dir[len dir - 1] != '/')
+			s := "/";
+		else
+			s = "";
+		
+		if(c.nmatch)
+			match := "";
+		else
+			match = ": no matches in:";
+			
+		warning(nil, sprint("%s%s%s*%s\n",dir, s, str, match));
+		for(i=0; i<c.nmatch; i++)
+			warning(nil, sprint(" %s\n", c.filename[i]));
+	}
+
+	if(c.advance)
+		return c.str;
+	else
+		return nil;
+	
+	return nil;
+}
+
+scrollup(t: ref Text, n: int)
+{
+	q0 := t.backnl(t.org, n);
+	t.setorigin(q0, FALSE);
+}
+
+scrolldown(t: ref Text, n: int)
+{
+	q0 := t.org+frcharofpt(t.frame, (t.frame.r.min.x, t.frame.r.min.y+n*t.frame.font.height));
+	t.setorigin(q0, FALSE);
+}
+
 Text.typex(t : self ref Text, r : int, echomode : int)
 {
 	q0, q1 : int;
 	nnb, nb, n, i : int;
 	u : ref Text;
+	rp : string;
 
 	if(alphabet != ALPHA_LATIN)
 		r = transc(r, alphabet);
@@ -687,37 +785,164 @@ Text.typex(t : self ref Text, r : int, echomode : int)
 		}
 		return;
 	}
-	if(t.what!=Body && r=='\n')
+
+	rp[0] = r;
+
+#TAG
+# Used to disallow \n in tag here.
+# Also if typing in tag, mark that resize might be necessary.
+
+	if(t.what!=Body && t.what != Tag && r=='\n')
 		return;
+	if(t.what == Tag)
+		t.w.tagsafe = FALSE;
+# END TAG
+
+	if(t.what == Tag)
 	case(r){
-		Kdown or Keyboard->Down =>
-			n = t.frame.maxlines/2;
-			q0 = t.org+frcharofpt(t.frame, (t.frame.r.min.x, t.frame.r.min.y+n*t.frame.font.height));
-			t.setorigin(q0, FALSE);
+		Keyboard->Down or Dat->Kscrolldown=>
+			if(!t.w.tagexpand){
+				t.w.tagexpand = TRUE;
+				t.w.reshape(t.w.r, FALSE, TRUE);
+			}
 			return;
-		Kup or Keyboard->Up =>
-			n = t.frame.maxlines/2;
-			q0 = t.backnl(t.org, n);
-			t.setorigin(q0, FALSE);
+		Keyboard->Up or Dat->Kscrollup =>
+			if(t.w.tagexpand){
+				t.w.tagexpand = FALSE;
+				t.w.taglines = 1;
+				t.w.reshape(t.w.r, FALSE, TRUE);
+			}
 			return;
-		Kleft or Keyboard->Left =>
+		Keyboard->Left or Keyboard->Right => # handled below
+			;
+	}
+	
+	case(r){
+		Dat->Kscrolldown=>
+			if(t.what == Body)
+				scrolldown(t, 2);
+			return;
+		Dat->Kscrollup =>
+			if(t.what == Body)
+				scrollup(t, 4);
+			return;
+		Keyboard->Down=>
+			t.commit(TRUE);
+			nnb=0;
+			if (t.q0 > 0 && (t.readc(t.q0-1) != '\n'))
+				nnb = t.bswidth(16r15);
+			if(t.navoffset == 0)
+				t.navoffset = nnb;
+			else
+				nnb = t.navoffset;
+			q0 = t.q0;
+			while (q0 < t.file.buf.nc && (t.readc(q0) != '\n'))
+				q0++;
+			if(q0 < t.file.buf.nc && (t.readc(q0) == '\n'))
+				q0++;
+			while(q0 < t.file.buf.nc && (t.readc(q0) != '\n') && nnb > 0){
+				nnb--;
+				q0++;
+			}
+			t.show (q0, q0);
+			return;
+		Keyboard->Up=>
+			t.commit(TRUE);
+			# go to where ^U would erase, if not already at BOL
+			nnb=0;
+			if (t.q0 > 0 && (t.readc(t.q0-1) != '\n'))
+				nnb = t.bswidth(16r15);
+			q0 = t.q0 - nnb - 1;
+			if(q0 < 0)
+				return;
+			if(t.navoffset == 0)
+				t.navoffset = nnb;
+			else
+				nnb = t.navoffset;
+			while(q0 > 0 && (t.readc(q0-1) != '\n'))
+				q0--;
+			while(q0 < t.file.buf.nc && (t.readc(q0) != '\n') && nnb > 0){
+				nnb--;
+				q0++;
+			}
+			t.show (q0, q0);
+			return;
+		Keyboard->Pgdown =>
+			scrolldown(t, 2*t.frame.maxlines/3);
+			return;
+		Keyboard->Pgup =>
+			scrollup(t, 2*t.frame.maxlines/3);
+			return;
+		Keyboard->Left =>
 			t.commit(TRUE);
 			if(t.q0 != t.q1)
 				t.show(t.q0, t.q0);
 			else if(t.q0 != 0)
 				t.show(t.q0-1, t.q0-1);
+			t.navoffset = 0;
 			return;
-		Kright or Keyboard->Right =>
+		Keyboard->Right =>
 			t.commit(TRUE);
 			if(t.q0 != t.q1)
 				t.show(t.q1, t.q1);
 			else if(t.q1 != t.file.buf.nc)
 				t.show(t.q1+1, t.q1+1);
+			t.navoffset = 0;
+			return;
+		16r06 or Keyboard->Ins =>
+			rp = t.complete();
+			if(rp == nil)
+				return;
+			break;
+		 16r10 or Keyboard->Home =>
+			t.commit(TRUE);
+			t.show(0,0);
+			return;
+		 16r11 or Keyboard->End=>
+			t.commit(TRUE);
+			t.show(t.file.buf.nc,t.file.buf.nc);
+			return;
+		16r01 => # ^A: beginning of line
+			t.commit(TRUE);
+			# go to where ^U would erase, if not already at BOL
+			nnb=0;
+			if (t.q0 > 0 && (t.readc(t.q0-1) != '\n'))
+				nnb = t.bswidth(16r15);
+			t.show (t.q0-nnb, t.q0-nnb);
+			return;
+		16r05 => # ^E: end of line
+			t.commit(TRUE);
+			q0 = t.q0;
+			while (q0 < t.file.buf.nc && (t.readc(q0) != '\n'))
+				q0++;
+			t.show (q0, q0);
+			return;
+		16r03 => # ^C: copy
+			t.commit(TRUE);
+			exec->cut(t, nil, TRUE, FALSE);
+			return;
+		16r1A => # ^Z: undo
+			t.commit(TRUE);
+			exec->undo(t, TRUE);
+			return;
+		16r13 => # ^S: saves
+			t.commit(TRUE);
+			exec->put(t, nil, nil, 0);
 			return;
 	}
 	if(t.what == Body){
 		seq++;
 		t.file.mark();
+	}
+	case(r){
+	16r18 => # ^X: cut
+		t.commit(TRUE);
+		exec->cut(t, nil, TRUE, TRUE);
+		return;
+	16r16 => # ^V: paste
+		t.commit(TRUE);
+		exec->paste(t, nil, FALSE, TRUE);
+		return;
 	}
 	if(t.q1 > t.q0){
 		if(t.ncache != 0)
@@ -731,7 +956,7 @@ Text.typex(t : self ref Text, r : int, echomode : int)
 	}
 	t.show(t.q0, t.q0);
 	case(r){
-	16r1B =>
+	16r1B => # Escape key
 		if(t.eq0 != ~0)
 			t.setselect(t.eq0, t.q0);
 		if(t.ncache > 0){
@@ -781,6 +1006,19 @@ if(0)	# DEBUGGING
 		for(i=0; i<t.file.ntext; i++)
 			t.file.text[i].fill();
 		return;
+	 '\n' =>
+		if (t.w.autoindent) {
+			# find beginning of previous line using backspace code
+			nnb = t.bswidth(16r15); # ^U case
+			rp[0] = r;
+			for (i=0; i<nnb; i++){
+				r = t.readc(t.q0-nnb+i);
+				if (r != ' ' && r != '\t')
+					break;
+				rp[len rp] = r;
+			}
+		}
+		break; # fall through to normal code
 	16r7f or Keyboard->Del =>
 		# Delete character - forward delete
 		t.commit(TRUE);
@@ -823,19 +1061,23 @@ if(0)	# DEBUGGING
 			u.cq0 = t.q0;
 		else if(t.q0 != u.cq0+u.ncache)
 			error("text.type cq1");
-		str := "Z";
-		str[0] = r;
-		u.insert(t.q0, str, 1, FALSE, echomode);
-		str = nil;
+		
+		# Change the tag before we add to ncache,
+		# so that if the window body is resized the
+		# commit will not find anything in ncache.
+#		if(u.what==Body && u.ncache == 0){
+#			u.needundo = TRUE;
+#			t.w.settag();
+#			u.needundo=FALSE;
+#		}
+		u.insert(t.q0, rp, len rp, FALSE, echomode);
 		if(u != t)
 			u.setselect(u.q0, u.q1);
-		if(u.ncache == u.ncachealloc){
-			u.ncachealloc += 10;
-			u.cache += "1234567890";
-		}
-		u.cache[u.ncache++] = r;
+		for (j:=0; j < len rp; j++)
+			u.cache[u.ncache++] = rp[j];
+		#sys->print("insert nnb:%d rp[%d]:%s.\n", nnb, len rp, rp);
 	}
-	t.setselect(t.q0+1, t.q0+1);
+	t.setselect(t.q0+len rp, t.q0+len rp);
 	if(r=='\n' && t.w!=nil)
 		t.w.commit(t);
 }
@@ -902,6 +1144,7 @@ Text.select(t : self ref Text, double : int)
 	b, x, y : int;
 	state : int;
 
+	t.navoffset = 0;
 	selecttext = t;
 	#
 	# To have double-clicking and chording, we double-click
@@ -1001,7 +1244,7 @@ Text.show(t : self ref Text, q0 : int, q1 : int)
 	nl : int;
 	q : int;
 
-	if(t.what != Body)
+	if(t.what != Body && t.what != Tag)
 		return;
 	if(t.w!=nil && t.frame.maxlines==0)
 		t.col.grow(t.w, 1, 0);

@@ -24,7 +24,7 @@ Utils : module {
 	debug : fn(s : string);
 	memdebug : fn(s : string);
 	postnote : fn(t : int, this : int, pid : int, note : string) : int;
-	exec: fn(c: string, args : list of string);
+	exec: fn(c: string, args : list of string):string;
 	getuser : fn() : string;
 	gethome : fn(user : string) : string;
 	access : fn(s : string) : int;

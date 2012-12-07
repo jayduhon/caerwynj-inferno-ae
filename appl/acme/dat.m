@@ -40,9 +40,11 @@ Dat : module {
 
 	FALSE, TRUE, XXX : con iota;
 
+	CHAPPEND : con 16r40000000;
+
 	EM_NORMAL, EM_RAW, EM_MASK : con iota;
 
-	Qdir,Qacme,Qcons,Qconsctl,Qdraw,Qeditout,Qindex,Qlabel,Qnew,QWaddr,QWbody,QWconsctl,QWctl,QWdata,QWeditout,QWevent,QWrdsel,QWwrsel,QWtag,QMAX : con iota;
+	Qdir,Qacme,Qcons,Qconsctl,Qdraw,Qeditout,Qindex,Qlabel,Qnew,QWaddr,QWbody,QWconsctl,QWctl,QWdata,QWedit,QWeditout,QWevent,QWrdsel,QWwrsel,QWtag,QMAX : con iota;
 
 	Blockincr : con 256;
 	Maxblock : con 8*1024;
@@ -53,7 +55,7 @@ Dat : module {
 	MAXRPC : con 8192+Styx->IOHDRSZ;
 	BUFSIZE : con MAXRPC;
 	EVENTSIZE : con 256;
-	PLUMBSIZE : con 1024;
+	PLUMBSIZE : con 1024*64;
 	Scrollwid : con 12;	# width of scroll bar
 	Scrollgap : con 4;	# gap right of scroll bar
 	Margin : con 4;		# margin around text
@@ -74,6 +76,9 @@ Dat : module {
 	ALPHA_LATIN: con '\0';
 	ALPHA_GREEK: con '*';
 	ALPHA_CYRILLIC: con '@';
+		
+	Kscrollup: con 16re050;
+	Kscrolldown: con 16re051;
 
 	Astring : adt {
 		s : string;
@@ -245,6 +250,8 @@ Dat : module {
 		}
 	};
 
+	globalincref: int;
+	globalautoindent: int;
 	seq : int;
 	maxtab : int;
 	mouse : ref Draw->Pointer;

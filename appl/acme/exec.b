@@ -20,16 +20,16 @@ fsys : Fsys;
 editm: Edit;
 
 Dir, OREAD, OWRITE : import Sys;
-EVENTSIZE, QWaddr, QWdata, QWevent, Astring : import dat;
+EVENTSIZE, QWaddr, QWdata, QWevent, Astring, CHAPPEND : import dat;
 Lock, Reffont, Ref, seltext, seq, row : import dat;
-warning, error, skipbl, findbl, stralloc, strfree, exec : import utils;
+warning, error, skipbl, findbl, stralloc, strfree, strncmp, exec : import utils;
 dirname : import lookx;
 Body, Text : import textm;
 File : import filem;
 sprint : import sys;
 TRUE, FALSE, XXX, BUFSIZE : import Dat;
 Buffer : import bufferm;
-Row : import rowm;
+Row, allwindows : import rowm;
 Column : import columnm;
 Window : import windowm;
 setalphabet: import textm;
@@ -66,7 +66,7 @@ Exectab : adt {
 	flag2 : int;
 };
 
-F_ALPHABET, F_CUT, F_DEL, F_DELCOL, F_DUMP, F_EDIT, F_EXITX, F_FONTX, F_GET, F_ID, F_INCL, F_KILL, F_LIMBO, F_LINENO, F_LOCAL, F_LOOK, F_NEW, F_NEWCOL, F_PASTE, F_PUT, F_PUTALL, F_UNDO, F_SEND, F_SORT, F_TAB, F_ZEROX : con iota;
+F_ALPHABET, F_CUT, F_DEL, F_DELCOL, F_DUMP, F_EDIT, F_EXITX, F_FONTX, F_GET, F_ID, F_INCL, F_INDENT, F_KILL, F_LIMBO, F_LINENO, F_LOCAL, F_LOOK, F_NEW, F_NEWCOL, F_PASTE, F_PUT, F_PUTALL, F_UNDO, F_SEND, F_SORT, F_TAB, F_ZEROX : con iota;
 
 exectab := array[] of {
 	Exectab ( "Alphabet",	F_ALPHABET,	FALSE,	XXX,		XXX		),
@@ -81,6 +81,7 @@ exectab := array[] of {
 	Exectab ( "Get",			F_GET,		FALSE,	TRUE,	XXX		),
 	Exectab ( "ID",			F_ID,		FALSE,	XXX,		XXX		),
 	Exectab ( "Incl",		F_INCL,		FALSE,	XXX,		XXX		),
+	Exectab ( "Indent",		F_INDENT,	FALSE,	XXX,		XXX		),
 	Exectab ( "Kill",			F_KILL,		FALSE,	XXX,		XXX		),
 	Exectab ( "Limbo",		F_LIMBO,		FALSE,	XXX,		XXX   	),
 	Exectab ( "Lineno",		F_LINENO,	FALSE,	XXX,		XXX		),
@@ -116,11 +117,12 @@ runfun(fun : int, et, t, argt : ref Text, flag1, flag2 : int, arg : string, narg
 		F_GET 		=> get(et, t, argt, flag1, arg, narg);
 		F_ID 		=> id(et);
 		F_INCL 		=> incl(et, argt, arg, narg);
+		F_INDENT	=> indent(et, argt, arg, narg);
 		F_KILL 		=> kill(argt, arg, narg);
 		F_LIMBO		=> limbo(et);
 		F_LINENO		=> lineno(et);
 		F_LOCAL 		=> local(et, argt, arg);
-		F_LOOK 		=> look(et, t, argt);
+		F_LOOK 		=> look(et, t, argt, arg, narg);
 		F_NEW 		=> lookx->new(et, t, argt, flag1, flag2, arg, narg);
 		F_NEWCOL	=> newcol(et);
 		F_PASTE		=> paste(et, t, flag1, flag2);
@@ -167,7 +169,7 @@ execute(t : ref Text, aq0 : int, aq1 : int, external : int, argt : ref Text)
 
 	q0 = aq0;
 	q1 = aq1;
-	if(q1 == q0){	# expand to find word (actually file name) 
+	if(q1 == q0 || (q1-q0) == 1){	# expand to find word (actually file name) 
 		# if in selection, choose selection 
 		if(t.q1>t.q0 && t.q0<=q0 && q0<=t.q1){
 			q0 = t.q0;
@@ -553,7 +555,7 @@ putfile(f: ref File, q0: int, q1: int, name: string)
 		
 		{
 			(ok, d) = sys->fstat(fd);
-			if(ok>=0 && (d.mode&Sys->DMAPPEND) && d.length>big 0){
+			if(ok>=0 && (d.mode&CHAPPEND) && d.length>big 0){
 				warning(nil, sprint("%s not written; file is append only\n", name));
 				raise "e";
 			}
@@ -593,6 +595,10 @@ putfile(f: ref File, q0: int, q1: int, name: string)
 					f.text[i].w.putseq = f.seq;
 					f.text[i].w.dirty = w.dirty;
 				}
+				if(w.isdir){
+					w.isdir = FALSE;
+					w.filemenu = TRUE;
+				}
 			}
 			strfree(s);
 			strfree(r);
@@ -623,7 +629,7 @@ put(et : ref Text, argt : ref Text, arg : string, narg : int)
 	name : string;
 	w : ref Window;
 
-	if(et==nil || et.w==nil || et.w.isdir)
+	if(et==nil || et.w==nil)
 		return;
 	w = et.w;
 	f := w.body.file;
@@ -768,7 +774,7 @@ paste(et : ref Text, t : ref Text, selectall : int, tobody: int)
 		t.w.unlock();
 }
 
-look(et : ref Text, t : ref Text, argt : ref Text)
+look(et : ref Text, t : ref Text, argt : ref Text, arg : string, narg : int)
 {
 	r : string;
 	s : ref Astring;
@@ -776,6 +782,10 @@ look(et : ref Text, t : ref Text, argt : ref Text)
 
 	if(et != nil && et.w != nil){
 		t = et.w.body;
+		if(narg > 0){
+			lookx->search(t, arg, narg);
+			return;
+		}
 		(nil, r, n) = getarg(argt, FALSE, FALSE);
 		if(r == nil){
 			n = t.q1-t.q0;
@@ -1064,6 +1074,51 @@ incl(et : ref Text, argt : ref Text, arg : string, narg : int)
 	}
 }
 
+IGlobal, IError, Ion, Ioff: con (iota-2);
+
+indentval (s : string, n: int) : int
+{
+	if (n < 2)
+		return IError;
+	if (strncmp(s, "ON", n) == 0){
+		dat->globalautoindent = TRUE;
+		warning(nil, "Indent ON\n");
+		return IGlobal;
+	}
+	if (strncmp(s, "OFF", n) == 0){
+		dat->globalautoindent = FALSE;
+		warning(nil, "Indent OFF\n");
+		return IGlobal;
+	}
+	return strncmp(s, "on", n) == 0;
+}
+
+indent(et : ref Text, argt : ref Text, arg : string, narg : int)
+{
+	a, r : string;
+	w : ref Window;
+	na, leng, autoindent : int;
+
+	w = nil;
+	if(et!=nil && et.w!=nil)
+		w = et.w;
+	autoindent = IError;
+	(nil, r, leng) = getarg(argt, FALSE, TRUE);
+
+	if(r!=nil && leng>0)
+		autoindent = indentval(r, leng);
+	else{
+		(a, na) = findbl(arg, narg);
+		if(a != arg)
+			autoindent = indentval(arg, narg-na);
+	}
+	if(autoindent == IGlobal)
+		allwindows(Edit->FIXINDENT, nil);
+	else if(w!=nil && autoindent>=0)
+		w.autoindent = autoindent;
+}
+
+
 tab(et : ref Text, argt : ref Text, arg : string, narg : int)
 {
 	a, r, p : string;
@@ -1092,7 +1147,7 @@ tab(et : ref Text, argt : ref Text, arg : string, narg : int)
 	if(tab > 0){
 		if(w.body.tabstop != tab){
 			w.body.tabstop = tab;
-			w.reshape(w.r, 1);
+			w.reshape(w.r, TRUE, TRUE);
 		}
 	}else
 		warning(nil, sys->sprint("%s: Tab %d\n", w.body.file.name, w.body.tabstop));
@@ -1119,11 +1174,14 @@ runfeed(p : array of ref Sys->FD, c : chan of int)
 	s : string;
 
 	sys->pctl(Sys->FORKFD, nil);
+	sys->dup(p[0].fd, 0);
+	p[0] = nil;
+	sys->pctl(Sys->NEWFD, 0 :: nil);
 	c <-= 1;
 	# p[1] = nil;
 	buf = array[256] of byte;
 	for(;;){
-		if((n = sys->read(p[0], buf, 256)) <= 0)
+		if((n = sys->read(sys->fildes(0), buf, 256)) <= 0)
 			break;
 		s = string buf[0:n];
 		dat->cerr <-= s;
@@ -1164,7 +1222,7 @@ run(win : ref Window, s : string, rdir : string, ndir : int, newns : int, argadd
 	pipechar := 0;
 	if (t < len s && (s[t] == '<' || s[t] == '|' || s[t] == '>')){
 		pipechar = s[t++];
-		s = s[t:];
+		s = s[t: ];
 	}
 	c.pid = sys->pctl(0, nil);
 	c.iseditcmd = iseditcmd;
@@ -1206,7 +1264,6 @@ run(win : ref Window, s : string, rdir : string, ndir : int, newns : int, argadd
 			utils->setenv("%", filename);
 		c.md = fsys->fsysmount(rdir, ndir, incl, nincl);
 		if(c.md == nil){
-			# error("child: can't mount /mnt/acme");
 			warning(nil, "can't mount /mnt/acme");
 			exit;
 		}
@@ -1216,6 +1273,8 @@ run(win : ref Window, s : string, rdir : string, ndir : int, newns : int, argadd
 		}
 		else
 			tfd = sys->open("/dev/null", OREAD);
+		if(tfd == nil)
+			exit;
 		sys->dup(tfd.fd, 0);
 		tfd = nil;
 		if((winid > 0 || iseditcmd) && (pipechar=='|' || pipechar=='<')){
@@ -1233,6 +1292,8 @@ run(win : ref Window, s : string, rdir : string, ndir : int, newns : int, argadd
 		}
 		else
 			tfd = sys->open("/dev/cons", OWRITE);
+		if(tfd == nil)
+			exit;
 		sys->dup(tfd.fd, 1);
 		tfd = nil;
 		if(winid > 0 && (pipechar=='|' || pipechar=='<')){
@@ -1285,7 +1346,7 @@ run(win : ref Window, s : string, rdir : string, ndir : int, newns : int, argadd
 				hard = 1;
 				break;
 			}
-			if(utils->strchr("#;&|^$=`'{}()<>[]*?^~`", r) >= 0) {
+			if(utils->strchr("#;&|^$=`'{}()<>[]*?^~`", r) >= 0) {# did include #
 				hard = 1;
 				break;
 			}
@@ -1314,9 +1375,10 @@ run(win : ref Window, s : string, rdir : string, ndir : int, newns : int, argadd
 				av = arg :: av;
 			av = utils->reverse(av);
 			c.av = av;
-			exec(hd av, av);
-			dat->cwait <-= string c.pid + " \"Exec\":";
-			exit;
+			err := exec(hd av, av);
+			if(err == nil) {
+				exit;
+			} # else fall through and let the shell have a go
 		}
 	}
 
@@ -1326,10 +1388,13 @@ run(win : ref Window, s : string, rdir : string, ndir : int, newns : int, argadd
 	}
 	av = nil;
 	av = s :: av;
-	av = "-c" :: av;
+	av = "-n" :: "-c" :: av;
 	av = "/dis/sh" :: av;
-	exec(hd av, av);
-	dat->cwait <-= string c.pid + " \"Exec\":";
+	err := exec(hd av, av);
+	if(err != nil)
+		sys->fprint(sys->fildes(2), "%s: %s\n", hd av, err);
+		
+#	dat->cwait <-= string c.pid + " \"Exec\":";
 	exit;
 }
 
