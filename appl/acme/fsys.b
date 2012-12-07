@@ -16,7 +16,7 @@ QTDIR, QTFILE, QTAPPEND : import Sys;
 DMDIR, DMAPPEND, Qid, ORCLOSE, OTRUNC, OREAD, OWRITE, ORDWR, Dir : import Sys;
 sprint : import sys;
 MAXWELEM, Rerror : import Styx;
-Qdir,Qacme,Qcons,Qconsctl,Qdraw,Qeditout,Qindex,Qlabel,Qnew,QWaddr,QWbody,QWconsctl,QWctl,QWdata,QWeditout,QWevent,QWrdsel,QWwrsel,QWtag,QMAX : import Dat;
+Qdir,Qacme,Qcons,Qconsctl,Qdraw,Qeditout,Qindex,Qlabel,Qnew,QWaddr,QWbody,QWconsctl,QWctl,QWdata,QWedit,QWeditout,QWevent,QWrdsel,QWwrsel,QWtag,QMAX, CHAPPEND : import Dat;
 TRUE, FALSE : import Dat;
 cxfidalloc, cerr : import dat;
 Mntdir, Fid, Dirtab, Lock, Ref, Smsg0 : import dat;
@@ -68,13 +68,14 @@ dirtab := array[10] of {
 	Dirtab ( nil,		0,			0,			0 ),
 };
 
-dirtabw := array[12] of {
+dirtabw := array[13] of {
 	Dirtab ( ".",		QTDIR,		Qdir,			8r500|DMDIR ),
 	Dirtab ( "addr",		QTFILE,		QWaddr,		8r600 ),
 	Dirtab ( "body",		QTAPPEND,	QWbody,		8r600|DMAPPEND ),
 	Dirtab ( "ctl",		QTFILE,		QWctl,		8r600 ),
 	Dirtab ( "consctl",	QTFILE,		QWconsctl,	8r200 ),
 	Dirtab ( "data",		QTFILE,		QWdata,		8r600 ),
+	Dirtab ( "edit",		QTFILE,		QWedit,		8r200 ),
 	Dirtab ( "editout",	QTFILE,		QWeditout,	8r200 ),
 	Dirtab ( "event",	QTFILE,		QWevent,		8r600 ),
 	Dirtab ( "rdsel",		QTFILE,		QWrdsel,		8r400 ),
@@ -771,20 +772,9 @@ fsyswrite(x : ref Xfid) : ref Xfid
 
 fsysclunk(x : ref Xfid, f : ref Fid) : ref Xfid
 {
-	t : Smsg0;
-
 	fsysdelid(f.mntdir);
-	if(f.open){
-		f.busy = FALSE;
-		f.open = FALSE;
-		x.c <-= Xfidm->Xclose;
-		return nil;
-	}
-	if(f.w != nil)
-		f.w.close();
-	f.busy = FALSE;
-	f.open = FALSE;
-	return respond(x, t, nil);
+	x.c <-= Xfidm->Xclose;
+	return nil;
 }
 
 fsysremove(x : ref Xfid) : ref Xfid

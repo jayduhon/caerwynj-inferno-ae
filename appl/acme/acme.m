@@ -15,6 +15,7 @@ Acme : module {
 
 	textcols, tagcols : array of ref Draw->Image;
 	but2col, but3col, but2colt, but3colt : ref Draw->Image;
+	colbordercol, rowbordercol, modbutcol : ref Draw->Image;
 
 	acmectxt : ref Draw->Context;
 	keyboardpid, mousepid, timerpid, fsyspid : int;

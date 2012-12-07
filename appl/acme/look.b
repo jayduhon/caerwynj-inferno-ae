@@ -114,7 +114,7 @@ look3(t : ref Text, q0 : int, q1 : int, external : int)
 		r = nil;
 		return;
 	}
-	if(0 && dat->plumbed){	# don't do yet : 2 acmes running => only 1 receives msg
+	if(dat->plumbed){	# don't do yet : 2 acmes running => only 1 receives msg
 		m := ref Msg;
 		m.src = "acme";
 		m.dst = nil;
@@ -493,7 +493,7 @@ expandfile(t : ref Text, q0 : int, q1 : int, e : Expand) : (int, Expand)
 		
 		if(colon>=0 && colon<t.file.buf.nc-1 && isaddrc(t.readc(colon+1))){
 			q1 = colon+1;
-			while(q1<t.file.buf.nc-1 && isaddrc(t.readc(q1)))
+			while(q1<t.file.buf.nc && isaddrc(t.readc(q1)))
 				q1++;
 		}else if(colon >= 0)
 			q1 = colon;
@@ -623,7 +623,7 @@ lookfile(s : string, n : int) : ref Window
 			w = c.w[i];
 			t = w.body;
 			k = len t.file.name;
-			if(k>0 && t.file.name[k-1] == '/')
+			if(k>1 && t.file.name[k-1] == '/')
 				k--;
 			if(t.file.name[0:k] == s[0:n]){
 				w = w.body.file.curtext.w;
@@ -683,11 +683,14 @@ openfile(t : ref Text, e : Expand) : (ref Window, Expand)
 		t.w.dirty = FALSE;
 		t.w.settag();
 		t.w.tag.setselect(t.w.tag.file.buf.nc, t.w.tag.file.buf.nc);
-		if(ow != nil)
+		if(ow != nil){
 			for(i=ow.nincl; --i>=0; ){
 				n = len ow.incl[i];
 				w.addincl(ow.incl[i], n);	# really do want to copy here
 			}
+			w.autoindent = ow.autoindent;
+		}else
+			w.autoindent = dat->globalautoindent;
 	}
 	if(e.a1 == e.a0)
 		eval = FALSE;

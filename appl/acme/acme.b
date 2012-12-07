@@ -135,8 +135,6 @@ init(ctxt : ref Draw->Context, argl : list of string)
 	
 		utils->debuginit();
 	
-		if (plumbmsg->init(1, "edit", Dat->PLUMBSIZE) >= 0)
-			plumbed = 1;
 	
 		main(argl);
 	
@@ -212,6 +210,8 @@ main(argl : list of string)
 		fontnames[1] = f;
 	arg = arginit(argl);
 	while(ac = argopt(arg)) case(ac){
+	'a' =>
+		dat->globalautoindent = TRUE;
 	'b' =>
 		dat->bartflag = TRUE;
 	'c' =>
@@ -236,6 +236,7 @@ main(argl : list of string)
 	sys->pctl(Sys->FORKNS|Sys->FORKENV, nil);
 	utils->setenv("font", fontnames[0]);
 	sys->bind("/acme/dis", "/dis", Sys->MBEFORE);
+	sys->bind("#sacmeplumb", "/chan", Sys->MREPL|Sys->MCREATE);
 	wdir = workdir->init();
 	if (wdir == nil)
 		wdir = ".";
@@ -262,8 +263,9 @@ main(argl : list of string)
 	nfontcache = 1;
 	fontcache[0] = reffont;
 
-	iconinit();
+	colinit();
 	usercolinit();
+	iconinit();
 	timerm->timerinit();
 	regx->rxinit();
 
@@ -282,7 +284,6 @@ main(argl : list of string)
 	sync := chan of int;
 	spawn waitproc(sys->pctl(0, nil), sync);
 	<- sync;
-	spawn plumbproc();
 
 	fsys->fsysinit();
 	dat->disk = (dat->disk).init();
@@ -331,6 +332,9 @@ main(argl : list of string)
 	spawn mousetask();
 	spawn waittask();
 	spawn xfidalloctask();
+	# Run the plumber inside acme, so plumber can start acme clients
+	spawn exec->run(nil, "{bind -c '#sacmeplumb' /chan; plumber /acme/plumbing > /tmp/plumb.log >[2=1]&}", nil, 0, TRUE, nil, nil, FALSE);
+	spawn plumbproc();
 
 	# notify(shutdown);
 	# waitc := chan of int;
@@ -484,10 +488,10 @@ keyboardtask()
 			}
 		}
 	}
-	exception{
+	exception e{
 		* =>
 			shutdown(utils->getexc());
-			raise;
+			raise e;
 			# acmeexit(nil);
 	}
 }
@@ -570,6 +574,21 @@ mousetask()
 					row.qlock.unlock();
 					break;
 				}
+				
+# TAG scroll wheel 
+				if(w != nil && (mouse.buttons &(8|16))){
+					if(mouse.buttons & 8)
+						but = Dat->Kscrollup;
+					else
+						but = Dat->Kscrolldown;
+					w.lock('M');
+					t.eq0 = ~0;
+					t.typex(but, 0);
+					w.unlock();
+					bflush();
+					row.qlock.unlock();
+					break;
+				}
 				if(mouse.xy.in(t.scrollr)){
 					if(but){
 						if(t.what == Columntag)
@@ -632,10 +651,10 @@ mousetask()
 			}
 		}
 	}
-	exception{
+	exception e {
 		* =>
 			shutdown(utils->getexc());
-			raise;
+			raise e;
 			# acmeexit(nil);
 	}
 }
@@ -933,25 +952,35 @@ boxbits := array[64] of {
 	 byte 16r7F, byte 16rFE, byte 16r00, byte 16r00,
 };
 
-iconinit()
+colinit()
 {
-	r : Rect;
-
-	# Blue
 	tagcols = array[NCOL] of ref Draw->Image;
+	textcols = array[NCOL] of ref Draw->Image;
+
 	tagcols[BACK] = display.colormix(Draw->Palebluegreen, Draw->White);
 	tagcols[HIGH] = display.color(Draw->Palegreygreen);
 	tagcols[BORD] = display.color(Draw->Purpleblue);
 	tagcols[TEXT] = black;
 	tagcols[HTEXT] = black;
-
-	# Yellow
-	textcols = array[NCOL] of ref Draw->Image;
 	textcols[BACK] = display.colormix(Draw->Paleyellow, Draw->White);
 	textcols[HIGH] = display.color(Draw->Darkyellow);
-	textcols[BORD] = display.color(Draw->Yellowgreen); 
+	textcols[BORD] = display.color(Draw->Yellowgreen);
 	textcols[TEXT] = black;
 	textcols[HTEXT] = black;
+
+	but2col = display.rgb(16raa, 16r00, 16r00);
+	but3col = display.rgb(16r00, 16r66, 16r00);
+	but2colt = white;
+	but3colt = white;
+	modbutcol =  display.rgb(16r00, 16r00, 16r99);
+	
+	colbordercol = display.black;
+	rowbordercol = display.black;
+}
+
+iconinit()
+{
+	r : Rect;
 
 	if(button != nil)
 		button = modbutton = colbutton = nil;
@@ -970,7 +999,7 @@ iconinit()
 	r.max.x -= 2;
 	draw(modbutton, r, tagcols[BORD], nil, (0, 0));
 	r = r.inset(2);
-	draw(modbutton, r, display.rgb(16r00, 16r00, 16r99), nil, (0, 0));	# was DMedblue
+	draw(modbutton, r, modbutcol, nil, (0, 0));	# was DMedblue
 
 	r = button.r;
 	colbutton = balloc(r, mainwin.chans, Draw->White);
@@ -978,13 +1007,8 @@ iconinit()
 	r.max.x -= 2;
 	draw(colbutton, r, tagcols[BORD], nil, (0, 0));
 
-#	arrowcursor = ref Cursor((-1, -1), (16, 32), arrowbits);
+	arrowcursor = ref Cursor((-1, -1), (16, 32), arrowbits);
 	boxcursor = ref Cursor((-7, -7), (16, 32), boxbits);
-
-	but2col = display.rgb(16raa, 16r00, 16r00);
-	but3col = display.rgb(16r00, 16r66, 16r00);
-	but2colt = white;
-	but3colt = white;
 
 	graph->cursorswitch(arrowcursor);
 }
@@ -1009,14 +1033,25 @@ cinit()
 
 col(s : string, n : int) : int
 {
-	return ((s[n]-'0') << 4) | (s[n+1]-'0');
+	d := 0;
+	if (s[n] >= 'A' && s[n] <= 'F')
+		d = ((s[n] - 'A' + 10)<<4);
+	else
+		d =  ((s[n]-'0') << 4);
+	n++;
+	if (s[n] >= 'A' && s[n] <= 'F')
+		d |= (s[n] - 'A' + 10);
+	else
+		d |=  (s[n]-'0');
+	
+	return d;
 }
 
 rgb(s : string, n : int) : (int, int, int)
 {
 	return (col(s, n), col(s, n+2), col(s, n+4));
 }
-
+	
 cenv(s : string, t : string, but : int, i : ref Image) : ref Image
 {
 	c := utils->getenv("acme-" + s + "-" + t + "-" + string but);
@@ -1024,14 +1059,19 @@ cenv(s : string, t : string, but : int, i : ref Image) : ref Image
 		c = utils->getenv("acme-" + s + "-" + string but);
 	if (c == nil && but != 0)
 		c = utils->getenv("acme-" + s);
+	if(c != nil && c[0] == '\''){
+		c = c[1:len c - 1];
+	}
 	if (c != nil) {
 		if (c[0] == '#' && len c >= 7) {
-			(r1, g1, b1) := rgb(c, 1);
+			(r, g, b) := rgb(c, 1);
+			cmap1 := (r<<24 | g <<16 | b << 8 | 16rff);
 			if (len c >= 15 && c[7] == '/' && c[8] == '#') {
-				(r2, g2, b2) := rgb(c, 9);
-				return display.colormix((r1<<24)|(g1<<16)|(b1<<8)|16rFF, (r2<<24)|(g2<<16)|(b2<<8)|16rFF);
+				(r, g, b) = rgb(c, 9);
+				cmap2 :=(r<<24 | g <<16 | b << 8 | 16rff);
+				return display.colormix(cmap1, cmap2);
 			}
-			return display.color((r1<<24)|(g1<<16)|(b1<<8)|16rFF);
+			return display.color(cmap1);
 		}
 		for (j := 0; j < len c; j++)
 			if (c[j] >= 'A' && c[j] <= 'Z')
@@ -1054,10 +1094,15 @@ usercolinit()
 	but2col = cenv("bg", "text", 2, but2col);
 	but3colt = cenv("fg", "text", 3, but3colt);
 	but3col = cenv("bg", "text", 3, but3col);
+	modbutcol = cenv("mod", "but", 0, modbutcol);
 	tagcols[TEXT] = cenv("fg", "tag", 0, tagcols[TEXT]);
 	tagcols[BACK] = cenv("bg", "tag", 0, tagcols[BACK]);
 	tagcols[HTEXT] = cenv("fg", "tag", 1, tagcols[HTEXT]);
 	tagcols[HIGH] = cenv("bg", "tag", 1, tagcols[HIGH]);
+	colbordercol = cenv("bord", "col", 0, display.black);
+	rowbordercol = cenv("bord", "row", 0, display.black);
+	tagcols[BORD] = cenv("bord", "tag", 0, tagcols[BORD]);
+	textcols[BORD] = cenv("bord", "text", 0, textcols[BORD]);
 }
 
 getsnarf()
@@ -1095,18 +1140,24 @@ plumbproc()
 {
 	plumbpid = sys->pctl(0, nil);
 	for(;;){
-		msg := Msg.recv();
-		if(msg == nil){
-			sys->print("Acme: can't read /chan/plumb.edit: %r\n");
-			plumbpid = 0;
-			plumbed = 0;
-			return;
+		while(plumbmsg->init(1, "edit", Dat->PLUMBSIZE) < 0){
+			sys->sleep(2000);
 		}
-		if(msg.kind != "text"){
-			sys->print("Acme: can't interpret '%s' kind of message\n", msg.kind);
-			continue;
+		plumbed = 1;
+		for(;;){
+			msg := Msg.recv();
+			if(msg == nil){
+				sys->print("Acme: can't read /chan/plumb.edit: %r\n");
+				plumbpid = 0;
+				plumbed = 0;
+				break;
+			}
+			if(msg.kind != "text"){
+				sys->print("Acme: can't interpret '%s' kind of message\n", msg.kind);
+				continue;
+			}
+			# sys->print("msg %s\n", string msg.data);
+			cplumb <-= msg;
 		}
-# sys->print("msg %s\n", string msg.data);
-		cplumb <-= msg;
 	}
 }

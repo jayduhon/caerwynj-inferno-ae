@@ -38,6 +38,7 @@ Framem : module {
 		tick : ref Draw->Image;		# typing tick
 		tickback : ref Draw->Image;	# saved image under tick
 		ticked : int;				# is tick on screen ?
+		noredraw : int;
 	};
 
 	frcharofpt : fn(f : ref Frame, p : Draw->Point) : int;

@@ -14,7 +14,10 @@ y.debug
 *.exe
 tmp/*
 fonts/*
+acme.dump
+
 
 syntax: regexp
 ^appl.*\.dis$
 mjl.*$
+cbj.*$

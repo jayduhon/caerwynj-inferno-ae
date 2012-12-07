@@ -64,6 +64,7 @@ SYSMODULES=\
 	daytime.m\
 	debug.m\
 	draw.m\
+	plumbmsg.m\
 	sh.m\
 	string.m\
 	styx.m\

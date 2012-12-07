@@ -27,7 +27,7 @@ Smsg0 : import Dat;
 TRUE, FALSE, XXX, BUFSIZE, MAXRPC : import Dat;
 EM_NORMAL, EM_RAW, EM_MASK : import Dat;
 Qdir, Qcons, Qlabel, Qindex, Qeditout : import Dat;
-QWaddr, QWdata, QWevent, QWconsctl, QWctl, QWbody, QWeditout, QWtag, QWrdsel, QWwrsel : import Dat;
+QWaddr, QWdata, QWevent, QWconsctl, QWctl, QWbody, QWedit, QWeditout, QWtag, QWrdsel, QWwrsel : import Dat;
 seq, cxfidfree, Lock, Ref, Range, Mntdir, Astring : import dat;
 error, warning, max, min, stralloc, strfree, strncmp : import utils;
 address : import regx;
@@ -107,9 +107,33 @@ xfidkill()
 		utils->postnote(Utils->PNPROC, thispid, xfidtid[i], "kill");
 }
 
+waitproc(pid : int, sync: chan of int)
+{
+	fd : ref Sys->FD;
+	n : int;
+
+	sys->pctl(Sys->FORKFD, nil);
+	w := sprint("#p/%d/wait", pid);
+	fd = sys->open(w, Sys->OREAD);
+	if (fd == nil)
+		error("fd == nil in waitproc");
+	sync <-= 0;
+	buf := array[Sys->WAITLEN] of byte;
+	status := "";
+	for(;;){
+		if ((n = sys->read(fd, buf, len buf))<0)
+			error("bad read in waitproc");
+		status = string buf[0:n];
+		dat->cwait <-= status;
+	}
+}
+
 Xfid.ctl(x : self ref Xfid)
 {
 	x.tid = sys->pctl(0, nil);
+	sync := chan of int;
+	spawn waitproc(x.tid, sync);
+	<-sync;
 	ox := xfidtid;
 	xfidtid = array[nxfidtid+1] of int;
 	xfidtid[0:] = ox[0:nxfidtid];
@@ -197,17 +221,21 @@ Xfid.open(x : self ref Xfid)
 		w.lock('E');
 		q = FILE(x.f.qid);
 		case(q){
-		QWaddr or QWdata or QWevent =>
+		QWaddr =>
 			if(w.nopen[q]++ == byte 0){
-				if(q == QWaddr){
-					w.addr = (Range)(0,0);
-					w.limit = (Range)(-1,-1);
-				}
-				if(q==QWevent && !w.isdir && w.col!=nil){
+				w.addr = (Range)(0,0);
+				w.limit = (Range)(-1,-1);
+			}
+		QWdata or QWedit =>
+			w.nopen[q]++;
+			seq++;
+			t.file.mark();
+		QWevent =>
+			if(w.nopen[q]++ == byte 0)
+				if(!w.isdir && w.col!=nil){
 					w.filemenu = FALSE;
 					w.settag();
 				}
-			}
 		QWrdsel =>
 			#
 			# Use a temporary file.
@@ -219,12 +247,14 @@ Xfid.open(x : self ref Xfid)
 			#
 			if(w.rdselfd != nil){
 				w.unlock();
+				row.qlock.unlock();
 				respond(x, fc, Einuse);
 				return;
 			}
 			w.rdselfd = diskm->tempfile();
 			if(w.rdselfd == nil){
 				w.unlock();
+				row.qlock.unlock();
 				respond(x, fc, "can't create temp file");
 				return;
 			}
@@ -257,6 +287,7 @@ Xfid.open(x : self ref Xfid)
 		QWeditout =>
 			if(editm->editing == FALSE){
 				w.unlock();
+				row.qlock.unlock();
 				respond(x, fc, "permission denied");
 				return;
 			}
@@ -279,15 +310,15 @@ Xfid.close(x : self ref Xfid)
 	q : int;
 
 	w = x.f.w;
-	# BUG in C version ? fsysclunk() has just set busy, open to FALSE
-	# x.f.busy = FALSE;
-	# if(!x.f.open){
-	#	if(w != nil)
-	#		w.close();
-	#	respond(x, fc, nil);
-	#	return;
-	# }
-	# x.f.open = FALSE;
+	x.f.busy = FALSE;
+	if(x.f.open == FALSE){
+		if(w != nil)
+			w.close();
+		x.f.w = nil;
+		respond(x, fc, nil);
+		return;
+	}
+	x.f.open = FALSE;
 	if(w != nil){
 		row.qlock.lock();	# tasks->procs now 
 		w.lock('E');
@@ -298,12 +329,12 @@ Xfid.close(x : self ref Xfid)
 				w.ctlfid = ~0;
 				w.ctllock.unlock();
 			}
-		QWdata or QWaddr or QWevent =>	
+		QWdata or QWaddr or QWedit or QWevent =>	
 			# BUG: do we need to shut down Xfid?
-			if (q == QWdata)
+			if (q == QWdata || q == QWedit)
 				w.nomark = FALSE;
 			if(--w.nopen[q] == byte 0){
-				if(q == QWdata)
+				if(q == QWdata || q == QWedit)
 					w.nomark = FALSE;
 				if(q==QWevent && !w.isdir && w.col!=nil){
 					w.filemenu = TRUE;
@@ -330,6 +361,7 @@ Xfid.close(x : self ref Xfid)
 		w.unlock();
 		row.qlock.unlock();
 	}
+	x.f.w = nil;
 	respond(x, fc, nil);
 }
  
@@ -436,6 +468,7 @@ Xfid.write(x : self ref Xfid)
 
 	qid = FILE(x.f.qid);
 	w = x.f.w;
+
 	row.qlock.lock();	# tasks->procs now
 	if(w != nil){
 		c = 'F';
@@ -485,6 +518,17 @@ Xfid.write(x : self ref Xfid)
 			break;
 		}
 		w.addr = a;
+		fc.count = count(x.fcall);
+		respond(x, fc, nil);
+	QWedit =>
+		r = string data(x.fcall);
+		nr = len r;
+		t = w.body;
+		w.commit(t);
+		if(w.nomark == FALSE)
+			seq++;
+		editm->editcmd(t, r, nr);
+		r = nil;
 		fc.count = count(x.fcall);
 		respond(x, fc, nil);
 	Qeditout or
@@ -844,7 +888,8 @@ loop :
 			err = Ebadevent;
 			break;
 		}
-		# row.qlock.lock();
+# locked by parent otherwise we deadlock
+#		row.qlock.lock();
 		case(c){
 		'x' or 'X' =>
 			exec->execute(t, q0, q1, TRUE, nil);
@@ -854,7 +899,7 @@ loop :
 			err = Ebadevent;
 			break loop;
 		}
-		# row.qlock.unlock();
+#		row.qlock.unlock();
 	}
 
 	ab := array of byte r[0:n];

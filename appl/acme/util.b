@@ -216,7 +216,7 @@ argf(p : ref Arg) : string
 	return bp;
 }
 
-exec(cmd : string, argl : list of string)
+exec(cmd : string, argl : list of string):string 
 {
 	file := cmd;
 	if(len file<4 || file[len file-4:]!=".dis")
@@ -232,11 +232,12 @@ exec(cmd : string, argl : list of string)
 		}
 		if(c == nil){
 			# debug(sys->sprint("file %s not found\n", file));
-			sys->fprint(stderr, "%s: %s\n", cmd, err);
-			return;
+			# sys->fprint(stderr, "%s: %s\n", cmd, err);
+			return err;
 		}
 	}
 	c->init(acme->acmectxt, argl);
+	return nil;
 }
 
 getuser() : string
@@ -496,6 +497,7 @@ errorwin(dir : string, ndir : int, incl : array of string, nincl : int) : ref Wi
 	r = nil;
 	for(i=nincl; --i>=0; )
 		w.addincl(incl[i], n);
+	w.autoindent = dat->globalautoindent;
 	return w;
 }
 
