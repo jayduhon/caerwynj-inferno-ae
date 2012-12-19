@@ -276,10 +276,21 @@ init(ctxt: ref Draw->Context, argv: list of string)
 		if (s == "exit") {
 			evch <-= "exit";
 			<-exitedch;
+			kill(sys->pctl(0, nil), "killgrp");
+			exit;
 		}
 		tkclient->wmctl(win, s);
 	}
 }
+
+kill(pid: int, note: string): int
+{
+	fd := sys->open("/prog/"+string pid+"/ctl", Sys->OWRITE);
+	if(fd == nil || sys->fprint(fd, "%s", note) < 0)
+		return -1;
+	return 0;
+}
+
 
 makemenu(win: ref Tk->Toplevel, w: string, title: string, items: list of ref OEBpackage->Reference)
 {
@@ -817,7 +828,7 @@ Document.new(i: ref OEBpackage->Item, fallbacks: list of (string, string),
 		win: ref Tk->Toplevel, w: string, size: Point, evch: string,
 		indexprogress: chan of int): (ref Document, string)
 {
-	if (i.mediatype != "text/x-oeb1-document")
+	if (i.mediatype != "text/x-oeb1-document" && i.mediatype != "application/xhtml+xml")
 		return (nil, "invalid mediatype: " + i.mediatype);
 	if (i.file == nil)
 		return (nil, "not found: " + i.missing);
