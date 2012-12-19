@@ -123,7 +123,7 @@ Ea, Eb, Ebig, Eblockquote, Ebr, Ecenter, Ecite, Ecode, Edfn,
 Ediv, Edl, Eem, Efont, Eh1, Eh2, Eh3, Eh4, Eh5, Eh6, Ehr, Ei, Eimg,
 Einput, Ekbd, Elabel, Emap, Eobject, Eol, Ep, Epre, Eq, Es, Esamp,
 Escript, Eselect, Esmall, Espan, Estrike, Estrong, Esub, Esup, Etable,
-Ett, Eu, Eul, Evar, Ent, Enumflowtags: con iota;
+Ett, Eu, Eul, Evar, Ent, Enav, Esection, Eabbr, Enumflowtags: con iota;
 
 flownames := array[] of {
 	Ea => "a",
@@ -172,6 +172,9 @@ flownames := array[] of {
 	Eu => "u",
 	Eul => "ul",
 	Evar => "var",
+	Enav => "nav",
+	Esection => "section",
+	Eabbr => "abbr",
 };
 tagmap: ref Map;
 
@@ -193,6 +196,8 @@ isblocklevel := array[Enumflowtags] of {
 	Ehr => byte 1,
 	Etable => byte 1,
 	Ep => byte 1,
+	Esection => byte 1,
+	Enav => byte 1,
 };
 
 inherited := array[Snumstyles] of {
@@ -848,7 +853,7 @@ e_block(d: ref Datasource, tagid: int, i: ref Item.Tag)
 
 	Ediv or
 	Ecenter or
-	Eblockquote =>
+	Eblockquote or Enav or Esection =>
 		while ((fi := nextitem(d, 1)) != nil)
 			e_flow(d, fi);
 
@@ -906,6 +911,7 @@ e_table(d: ref Datasource, i: ref Item.Tag)
 	# placed into position when the table is laid out.
 	rspan := array[10] of {* => 0};
 	for (; si != nil; si = nexttag(d, 1)) {
+		# needs to handle thead, tbody, colgroup
 		if (si.name != "tr") {
 			warning(d, "non-tr tag <" + si.name + "> found in table body");
 			continue;
@@ -1017,6 +1023,7 @@ e_inline(d: ref Datasource, tagid: int, i: ref Item.Tag)
 	Ekbd or
 	Evar or
 	Ecite or
+	Eabbr or
 
 	# %fontstyle
 	Ett or

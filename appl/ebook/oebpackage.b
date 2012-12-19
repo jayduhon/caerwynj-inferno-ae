@@ -51,7 +51,7 @@ open(f: string, warnings: chan of (Xml->Locator, string)): (ref Package, string)
 	# <?xml><!DOCTYPE ...><package> ....</package>
 	# i.e. no space between the doctype declaration and the
 	# start of the package tag.
-	for(i := 0; i < 3; i++){
+#	for(i := 0; i < 3; i++){
 		xi = x.next();
 		if(xi == nil)
 			return (nil, "not OEB package");
@@ -77,7 +77,7 @@ open(f: string, warnings: chan of (Xml->Locator, string)): (ref Package, string)
 		* =>
 			return (nil, "not OEB package (no DOCTYPE)");
 		}
-	}
+#	}
 	p := ref Package;
 	p.file = f;
 
